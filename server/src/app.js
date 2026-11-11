@@ -78,6 +78,51 @@ app.get('/api/health', (req, res) => {
 });
 
 const path = require('path');
+const fs = require('fs');
+
+// Safety net middleware: if a client makes a call omitting the /api prefix, forward to /api
+const apiPrefixes = [
+  '/auth',
+  '/workouts',
+  '/sleep',
+  '/meals',
+  '/activity',
+  '/habits',
+  '/wellness',
+  '/energy',
+  '/measurements',
+  '/recovery',
+  '/digital',
+  '/goals',
+  '/analytics',
+  '/ai'
+];
+app.use((req, res, next) => {
+  const match = apiPrefixes.find(
+    (p) => req.url === p || req.url.startsWith(`${p}/`) || req.url.startsWith(`${p}?`)
+  );
+  if (match) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
+// Root endpoint for status check (split deployment on Render)
+const clientDistPath = path.join(__dirname, '../../client/dist');
+const indexHtmlPath = path.join(clientDistPath, 'index.html');
+const hasClientBuild = fs.existsSync(indexHtmlPath);
+
+app.get('/', (req, res, next) => {
+  if (hasClientBuild) {
+    return res.sendFile(indexHtmlPath);
+  }
+  res.status(200).json({
+    success: true,
+    message: 'Life & Health Tracker Backend API is running',
+    environment: env.NODE_ENV,
+    health: '/api/health'
+  });
+});
 
 // Mount modular routes
 app.use('/api/auth', authRoutes);
@@ -96,19 +141,20 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Serve frontend in production or if client/dist exists
-const clientDistPath = path.join(__dirname, '../../client/dist');
-app.use(express.static(clientDistPath));
+if (hasClientBuild) {
+  app.use(express.static(clientDistPath));
 
-app.get('*', (req, res, next) => {
-  if (req.originalUrl.startsWith('/api')) {
-    return next();
-  }
-  res.sendFile(path.join(clientDistPath, 'index.html'), (err) => {
-    if (err) {
-      next();
+  app.get('*', (req, res, next) => {
+    if (req.originalUrl.startsWith('/api')) {
+      return next();
     }
+    res.sendFile(indexHtmlPath, (err) => {
+      if (err) {
+        next();
+      }
+    });
   });
-});
+}
 
 // 404 handler for unknown routes
 app.use((req, res, next) => {
